@@ -18,7 +18,9 @@ const client = mongoose.connect(connectionString);
 
 const codukuSchema = new mongoose.Schema({
     puzzle: [Number],
-    solution: [Number]
+    solution: [Number],
+    currentTurn: String,
+    users: [String],
 });
 
 const Coduku = mongoose.model ('Coduku', codukuSchema);
@@ -35,17 +37,35 @@ io.on('connection', (socket) => {
     });
 
     socket.on('playTurn', async (msg) => {
-        const boardData = await Coduku.findById(msg.id);
-
+        let coduku = await Coduku.findOne({_id:msg.id});
+        const users = [...coduku['users']]
+        const currentUserIndex = users.findIndex(name => name === msg.currentTurn);
+       if(currentUserIndex < coduku['users'].length-1){
+            coduku = await Coduku.findOneAndUpdate({ _id: msg.id }, { $set: { currentTurn: users[currentUserIndex+1] ,puzzle: msg.puzzle} },{new: true, returnDocument: 'after'})
+       }else{
+           coduku =  await Coduku.findOneAndUpdate({ _id: msg.id }, { $set: { currentTurn: users[0] ,puzzle: msg.puzzle}},{new: true, returnDocument: 'after'})
+       }
+       io.emit('updateGameData',coduku);
     });
+
+    socket.on('joinGame', async (msg) => {
+        const coduku = await Coduku.findOne({users: {'$all': msg.name},_id: msg.id})
+        if(coduku){
+            io.emit('receiveGameData',coduku)
+        }else{
+            const coduku = await Coduku.findOneAndUpdate({_id: msg.id},{"$push": {"users": msg.name}});
+            io.emit('receiveGameData',coduku)
+        }
+    })
 
     socket.on('numberInput', (msg) => {
         console.log('message: ' + msg);
         io.emit('numberInput', msg);
     });
 
-    socket.on('initiateGame', (msg) => {
-        const coduku = new Coduku({puzzle: [...msg.puzzle], solution: [...msg.solution]}).save();
+    socket.on('initiateGame', async (msg) => {
+        const coduku = await new Coduku({puzzle: [...msg.puzzle], solution: [...msg.solution], currentTurn: msg.name,users: [msg.name]}).save();
+        console.log(coduku)
         io.emit('receiveGameData',coduku)
     });
 });
