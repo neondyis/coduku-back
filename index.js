@@ -19,8 +19,11 @@ const client = mongoose.connect(connectionString);
 const codukuSchema = new mongoose.Schema({
     puzzle: [Number],
     solution: [Number],
+    initPuzzle: [Number],
     currentTurn: String,
     users: [String],
+    startTime: Date,
+    notes: []
 });
 
 const Coduku = mongoose.model ('Coduku', codukuSchema);
@@ -33,7 +36,7 @@ io.on('connection', (socket) => {
 
     socket.on('getGameData', async (msg) => {
         const coduku = await Coduku.findById(msg.id)
-        io.emit('receiveGameData',coduku)
+        socket.emit('receiveGameData',coduku)
     });
 
     socket.on('playTurn', async (msg) => {
@@ -51,21 +54,42 @@ io.on('connection', (socket) => {
     socket.on('joinGame', async (msg) => {
         const coduku = await Coduku.findOne({users: {'$all': msg.name},_id: msg.id})
         if(coduku){
-            io.emit('receiveGameData',coduku)
+            socket.emit('receiveGameData',coduku)
         }else{
-            const coduku = await Coduku.findOneAndUpdate({_id: msg.id},{"$push": {"users": msg.name}});
-            io.emit('receiveGameData',coduku)
+            const coduku = await Coduku.findOneAndUpdate({_id: msg.id},{$push: {users: msg.name}});
+            socket.emit('receiveGameData',coduku)
         }
     })
 
-    socket.on('numberInput', (msg) => {
-        console.log('message: ' + msg);
-        io.emit('numberInput', msg);
+    socket.on('initiateGame', async (msg) => {
+        const coduku = await new Coduku({puzzle: [...msg.puzzle], solution: [...msg.solution], initPuzzle: [...msg.puzzle], currentTurn: msg.name,users: [msg.name], startTime: msg.startTime}).save();
+        socket.emit('receiveGameData',coduku)
     });
 
-    socket.on('initiateGame', async (msg) => {
-        const coduku = await new Coduku({puzzle: [...msg.puzzle], solution: [...msg.solution], currentTurn: msg.name,users: [msg.name]}).save();
-        console.log(coduku)
-        io.emit('receiveGameData',coduku)
+
+    socket.on('getGameList', async (msg) => {
+        const coduku = await Coduku.find({},{_id: 1, currentTurn:1})
+        socket.emit('gameListInfo', coduku);
     });
+
+    socket.on('modifyNotes', async (msg) => {
+        const coduku = await Coduku.findById({_id: msg.id},{});
+        if(coduku){
+            const notes = [...coduku['notes']]
+            const notesExistIndex = notes.findIndex(noteArray => noteArray[0].boardIndex === msg.notes[0].boardIndex)
+            let updatedNotes;
+            if(notesExistIndex > -1){
+                notes[notesExistIndex] = msg.notes;
+                updatedNotes = await Coduku.findByIdAndUpdate({_id: msg.id},{$set: {notes: notes}},{new: true, returnDocument: 'after'})
+            }else{
+                updatedNotes = await Coduku.findByIdAndUpdate({_id: msg.id},{$push: {notes: msg.notes}},{new: true, returnDocument: 'after'})
+            }
+            io.emit('updateClientNotes', updatedNotes.notes);
+        }
+    })
+
+    socket.on('ping', async (msg) => {
+        const coduku = await Coduku.findOneAndUpdate({_id: msg.id},{$push: {"users": msg.name}});
+        socket.emit('receiveGameData',coduku)
+    })
 });
